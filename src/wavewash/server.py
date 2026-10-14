@@ -40,6 +40,34 @@ ALLOWED_HOSTS = {"127.0.0.1", "localhost", "[::1]", "::1", "testserver"}
 ALLOWED_ORIGIN_RE = re.compile(r"^https?://(127\.0\.0\.1|localhost|\[::1\])(:\d+)?$")
 _PROTECTED_DIRS = {"/etc", "/usr", "/bin", "/sbin", "/System", "/Library", "/var", "/boot", "/dev", "/proc", "/sys",
                    "C:\\Windows", "C:\\Program Files"}
+
+
+def _resolved(paths):
+    """Protected paths plus their real locations (on macOS /etc is a link to /private/etc)."""
+    out = set()
+    for p in paths:
+        out.add(p)
+        try:
+            out.add(str(Path(p).resolve()))
+        except OSError:
+            pass
+    return out
+
+
+# Blocked exactly, and everything inside them is blocked too:
+_SYSTEM_TREES = _resolved({"/etc", "/usr", "/bin", "/sbin", "/System", "/boot", "/dev", "/proc", "/sys",
+                           "C:\\Windows", "C:\\Program Files"})
+# Blocked only as the folder itself (users legitimately have folders below these):
+_PROTECTED_DIRS = _resolved(_PROTECTED_DIRS)
+
+
+def _is_system_folder(out: Path) -> bool:
+    s = str(out)
+    if out == Path(out.anchor) or s in _PROTECTED_DIRS:
+        return True
+    return any(s == t or s.startswith(t.rstrip("/\\") + ("\\" if "\\" in t else "/")) for t in _SYSTEM_TREES)
+
+
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 app = FastAPI(title="WaveWash Backend")
@@ -299,7 +327,7 @@ def run_pipeline(req: RunRequest):
     if req.output_path:
         out = Path(req.output_path).expanduser().resolve()
         req.output_path = str(out)
-        if out == Path(out.anchor) or str(out) in _PROTECTED_DIRS:
+        if _is_system_folder(out):
             raise HTTPException(400, "Choose a normal data folder for the output, not a system folder.")
         inp_r = inp
         if out == inp_r or inp_r in out.parents:

@@ -52,6 +52,7 @@ def test_output_folder_rules(client, tmp_path):
     assert c.post("/api/run", json={**base, "output_path": str(inp / "out")}).status_code == 400
     if sys.platform != "win32":
         assert c.post("/api/run", json={**base, "output_path": "/etc"}).status_code == 400
+        assert c.post("/api/run", json={**base, "output_path": "/etc/wavewash-out"}).status_code == 400
     assert c.post("/api/run", json={**base, "output_path": str(tmp_path)}).status_code == 400  # contains input
     assert c.post("/api/run", json={"input_path": str(tmp_path / "nope"), "purpose": "asr"}).status_code == 400
     assert c.post("/api/run", json={**base, "purpose": "not_a_purpose"}).status_code == 400
