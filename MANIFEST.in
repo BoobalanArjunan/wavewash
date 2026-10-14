@@ -1,0 +1,9 @@
+include README.md LICENSE
+recursive-include src/wavewash/static *
+recursive-include frontend *
+prune frontend/node_modules
+prune frontend/dist
+global-exclude __pycache__ *.pyc .DS_Store
+recursive-include tests *.py
+recursive-include docs *.md *.png
+include .github/workflows/tests.yml

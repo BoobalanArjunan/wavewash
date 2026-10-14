@@ -1,0 +1,49 @@
+@import "tailwindcss";
+
+@theme {
+  --font-ui: "Manrope", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", "SF Mono", monospace;
+
+  --color-bg: #14161A;
+  --color-panel: #1C1F24;
+  --color-panel-raised: #22262C;
+  --color-border: #2A2E35;
+  --color-text: #EDEEF0;
+  --color-text-muted: #8B9099;
+  --color-text-faint: #5B6068;
+
+  --color-accent: #E8A33D;
+  --color-accent-dim: #B8822F;
+
+  --color-pass: #4ADE80;
+  --color-fixed: #E8A33D;
+  --color-fail: #F87171;
+  --color-dup: #60A5FA;
+}
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    background-color: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-ui);
+    -webkit-font-smoothing: antialiased;
+  }
+  ::selection {
+    background-color: var(--color-accent);
+    color: var(--color-bg);
+  }
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-border) transparent;
+  }
+}
+
+@layer utilities {
+  .font-mono-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+}
