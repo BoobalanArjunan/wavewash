@@ -74,3 +74,6 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Hugging Face Space submodule
+huggingface_space/
