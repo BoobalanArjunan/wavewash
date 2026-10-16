@@ -77,3 +77,6 @@ Thumbs.db
 
 # Hugging Face Space submodule
 huggingface_space/
+
+# Personal local planning & checkpoints (never push to GitHub)
+project_plan/
