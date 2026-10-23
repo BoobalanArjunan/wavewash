@@ -22,6 +22,7 @@ import librosa
 
 from .config import PurposeProfile
 from .vad_module import get_speech_segments
+from . import music_checks
 
 
 @dataclass
@@ -46,11 +47,23 @@ class QualityReport:
     num_speakers_estimate: Optional[int] = None
     vad_backend: Optional[str] = None
 
+    mono_sum_loss_db: Optional[float] = None
+    dropout_count: Optional[int] = None
     spectral_cliff_db_per_oct: Optional[float] = None
     spectral_cliff_hz: Optional[float] = None
     warnings: List[str] = field(default_factory=list)
 
     issues: List[str] = field(default_factory=list)
+
+    @property
+    def passed(self) -> bool:
+        """Returns True if the file loaded successfully and has zero blocking issues."""
+        return self.ok_to_load and len(self.issues) == 0
+
+    @property
+    def is_clean(self) -> bool:
+        """Alias for passed."""
+        return self.passed
 
 
 def load_audio(path: Path):
@@ -325,7 +338,10 @@ def analyze_file(path: Path, profile: PurposeProfile,
     # --- clipping ---
     clipped = estimate_clipping(audio)
     report.clipped_ratio = clipped
-    if clipped > profile.max_clipped_ratio:
+    if clipped > profile.max_repairable_clipped_ratio:
+        report.issues.append(f"CLIPPING_HEAVY: {clipped*100:.2f}% samples saturated, more than the "
+                              f"{profile.max_repairable_clipped_ratio*100:.1f}% that can be repaired honestly")
+    elif clipped > profile.max_clipped_ratio:
         report.issues.append(f"CLIPPING: {clipped*100:.3f}% samples saturated "
                               f"(max allowed {profile.max_clipped_ratio*100:.3f}%)")
 
@@ -382,6 +398,10 @@ def analyze_file(path: Path, profile: PurposeProfile,
                 f"LOW_DYNAMIC_RANGE: crest factor {cf:.1f}dB < min "
                 f"{profile.min_crest_factor_db}dB (over-compressed/limited master?)")
 
+    # --- music-only checks ---
+    if profile.enable_music_checks:
+        _music_checks(audio, sr, profile, report)
+
     # --- lossy / filtered source detection ---
     # REJECT only on evidence of a filter/codec (a sharp spectral cliff).
     # A merely low rolloff (bass-heavy instruments) is reported as a WARNING.
@@ -428,3 +448,32 @@ def analyze_file(path: Path, profile: PurposeProfile,
             report.issues.append("MULTI_SPEAKER_SUSPECTED: possible crosstalk/second speaker")
 
     return report
+
+
+def _music_checks(audio: np.ndarray, sr: int, profile: PurposeProfile, report: QualityReport) -> None:
+    dead = music_checks.dead_channels(audio)
+    if dead:
+        names = ", ".join(str(c + 1) for c in dead)
+        report.issues.append(f"DEAD_CHANNEL: channel {names} is empty while the other channel has sound "
+                              f"(the music is in one ear only)")
+    elif music_checks.is_dual_mono(audio):
+        report.warnings.append("FAKE_STEREO: both channels are identical (mono saved as stereo); "
+                                "there is no stereo information to learn from")
+    else:
+        loss = music_checks.mono_sum_loss_db(audio)
+        report.mono_sum_loss_db = loss
+        if loss is not None and loss <= profile.music_min_mono_sum_db:
+            report.warnings.append(f"MONO_CANCELLATION: averaging the channels into mono loses {-loss:.1f} dB "
+                                    f"(limit {-profile.music_min_mono_sum_db:.0f} dB): the channels partly cancel, "
+                                    f"which is a phase problem and will sound thin or empty as mono")
+    drops = music_checks.find_dropouts(audio, sr, profile.music_min_dropout_ms)
+    report.dropout_count = len(drops)
+    if drops:
+        s0, ms0 = drops[0]
+        report.warnings.append(f"DIGITAL_DROPOUT: {len(drops)} stretch(es) of exact digital silence in the middle of the music "
+                                f"(first at {s0:.2f} s, {ms0:.0f} ms): a lost-data glitch, unless the break is intentional")
+    starts, ends = music_checks.abrupt_edges(audio)
+    if starts or ends:
+        which = " and ".join(w for w, f in (("starts", starts), ("ends", ends)) if f)
+        report.warnings.append(f"ABRUPT_EDGE: the file {which} mid-sound, which leaves a click "
+                                f"(normal for a chunk cut from a longer song)")

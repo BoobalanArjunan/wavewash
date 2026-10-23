@@ -180,13 +180,13 @@ wavewash run --input ./raw --output ./clean --purpose asr --use-real-vad
 | Silent lead-in/lead-out | Trimmed |
 | DC offset (waveform not centered on zero) | Corrected |
 | Wrong loudness | Normalized to target |
-| A few clicks/pops from tiny clipped moments | Smoothed out |
+| Short clipped moments (up to 8 ms each, up to 5% of samples) | Rebuilt by interpolation, never lowered below the clipped value; the whole file may be lowered a little so the peaks fit, and the log says by how much |
 
 **Rejected — moved to `_error/<reason>/` instead:**
 | Reason folder | What it means |
 |---|---|
 | `low_snr` | Too much background noise relative to the signal |
-| `clipping` | Audio distortion too severe to repair |
+| `clipping` | Audio distortion too severe to repair (more than 5% of samples at full scale, or still clipped after repair) |
 | `mostly_silence` | Barely any actual sound in the clip |
 | `corrupt_or_unreadable` | The file itself is broken |
 | `high_reverb` | Room echo too strong (ASR/TTS purposes) |

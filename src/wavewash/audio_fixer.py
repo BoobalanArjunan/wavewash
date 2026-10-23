@@ -95,92 +95,89 @@ def fix_loudness(audio: np.ndarray, sr: int, target_lufs: float) -> Tuple[np.nda
 
 def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: float = 0.999) -> Tuple[np.ndarray, Optional[str]]:
     """
-    De-clip by interpolating across clipped runs up to `max_run_ms` long.
-    Runs longer than that are left alone -- too much of the original waveform
-    is genuinely gone at that point; interpolating across it would be
-    fabricating audio, not repairing it, and the file's overall clipped_ratio
-    should fail the quality check and get rejected instead.
+    Repair clipped runs up to `max_run_ms` long by cubic interpolation, under one rule:
+    **a clipped sample's true value is at least the clip level.** The interpolated value is
+    therefore never allowed below the sample it replaces.
 
-    Uses cubic interpolation (via scipy) when there are enough surrounding
-    samples to fit one -- a meaningfully smoother, more natural-sounding
-    repair than a straight line for anything beyond a couple of samples.
-    Falls back to linear interpolation for very short runs or right at the
-    start/end of the file, where a cubic fit isn't well-defined.
+    Why that rule matters (measured on known-clipped speech-like audio, error against the
+    unclipped original, median of 5 signals): plain interpolation lowered the peaks, so after
+    "repair" the audio was 18 dB (at 0.1% clipped samples) to 5 dB (at 2%) FURTHER from the
+    original than the untouched clipped file, while the re-check reported the clipping as fixed.
+    With the rule the repair is about neutral at 0.1% to 0.5% clipping (within 0.4 dB either way)
+    and better above: +1.1 dB at 2%, +8 dB at 5%, +13 dB at 10%. Real speech may differ; see
+    docs/REAL_DATA_CHECK.md.
 
-    NOTE ON SCOPE: this is still parameter-free interpolation, not a real
-    declipping model (e.g. sparse-reconstruction or consistent-signal-recovery
-    algorithms). It's a solid, fast improvement over pure linear interpolation
-    within the run lengths it targets -- not a substitute for a dedicated
-    restoration tool on heavily clipped material.
+    Restored peaks can rise above full scale. The whole file (all channels together) is then
+    scaled down just enough that the highest peak sits at 0.999, and the description says by how
+    much. Runs longer than `max_run_ms`, and runs too near the start or end of the file to fit a
+    curve, are left alone.
+
+    Still parameter-free interpolation, not a trained declipping model: it is not a substitute
+    for a dedicated restoration tool on heavily clipped material (the pipeline rejects those, see
+    `max_repairable_clipped_ratio`).
     """
     max_run_samples = max(1, int(max_run_ms / 1000 * sr))
+    from scipy.interpolate import CubicSpline
+    ctx = 4
 
-    def declip_channel(x: np.ndarray) -> Tuple[np.ndarray, int, int]:
-        clipped_mask = np.abs(x) >= threshold
+    def declip_channel(x: np.ndarray):
+        # A clipped sample sits exactly at the ceiling. Samples that are merely near full scale are natural
+        # peaks, and lifting those would overshoot the truth, so only samples within 1e-4 of the highest
+        # positive (or lowest negative) value, and at or above `threshold`, count as clipped.
+        x = x.astype(np.float64)
+        pos, neg = float(x.max()), float(-x.min())
+        clipped_mask = (x >= max(pos - 1e-4, threshold)) | (-x >= max(neg - 1e-4, threshold))
         if not clipped_mask.any():
-            return x, 0, 0
-        x = x.copy()
+            return x, 0, 0, 0
         n = len(x)
         i = 0
-        fixed_runs = 0
-        skipped_runs = 0
+        fixed_runs = skipped_runs = fixed_samples = 0
         while i < n:
-            if clipped_mask[i]:
-                j = i
-                while j < n and clipped_mask[j]:
-                    j += 1
-                run_len = j - i
-                if run_len > max_run_samples:
-                    skipped_runs += 1
-                    i = j
-                    continue
-
-                # gather a few good samples on either side for a cubic fit
-                context = 3
-                left_start = max(0, i - context)
-                right_end = min(n, j + context)
-                have_left = i - left_start
-                have_right = right_end - j
-
-                if run_len >= 3 and have_left >= 2 and have_right >= 2:
-                    try:
-                        from scipy.interpolate import CubicSpline
-                        xs = np.concatenate([np.arange(left_start, i), np.arange(j, right_end)])
-                        ys = np.concatenate([x[left_start:i], x[j:right_end]])
-                        cs = CubicSpline(xs, ys)
-                        x[i:j] = cs(np.arange(i, j))
-                    except Exception:
-                        left = x[i - 1] if i > 0 else 0.0
-                        right = x[j] if j < n else 0.0
-                        x[i:j] = np.linspace(left, right, run_len)
-                else:
-                    left = x[i - 1] if i > 0 else 0.0
-                    right = x[j] if j < n else 0.0
-                    x[i:j] = np.linspace(left, right, run_len)
-
-                # a repaired stretch shouldn't itself re-clip -- keep it just under scale
-                x[i:j] = np.clip(x[i:j], -0.999, 0.999)
-                fixed_runs += 1
-                i = j
-            else:
+            if not clipped_mask[i]:
                 i += 1
-        return x, fixed_runs, skipped_runs
+                continue
+            j = i
+            while j < n and clipped_mask[j]:
+                j += 1
+            left_start, right_end = max(0, i - ctx), min(n, j + ctx)
+            if j - i > max_run_samples or i - left_start < 2 or right_end - j < 2:
+                skipped_runs += 1
+            else:
+                xs = np.concatenate([np.arange(left_start, i), np.arange(j, right_end)])
+                ys = np.concatenate([x[left_start:i], x[j:right_end]])
+                est = CubicSpline(xs, ys)(np.arange(i, j))
+                orig = x[i:j]
+                x[i:j] = np.sign(orig) * np.maximum(np.abs(est), np.abs(orig))   # never below the clipped value
+                fixed_runs += 1
+                fixed_samples += j - i
+            i = j
+        return x, fixed_runs, skipped_runs, fixed_samples
 
     if audio.ndim == 1:
-        fixed, runs, skipped = declip_channel(audio)
+        fixed, runs, skipped, nsamp = declip_channel(audio)
+        total = len(audio)
     else:
-        fixed = audio.copy()
-        runs = skipped = 0
+        fixed = np.empty(audio.shape, dtype=np.float64)
+        runs = skipped = nsamp = 0
         for c in range(audio.shape[1]):
-            fixed[:, c], r, s = declip_channel(audio[:, c])
+            fixed[:, c], r, sk, ns = declip_channel(audio[:, c])
             runs += r
-            skipped += s
+            skipped += sk
+            nsamp += ns
+        total = audio.size
 
     if runs == 0:
         return audio, None
-    desc = f"interpolated {runs} clipped run(s) (up to {max_run_ms:.0f}ms each)"
+    peak = float(np.max(np.abs(fixed)))
+    scale_note = ""
+    if peak > 0.999:
+        fixed = fixed * (0.999 / peak)
+        scale_note = f"; level lowered {-20 * np.log10(0.999 / peak):.1f} dB so the restored peaks fit"
+    fixed = fixed.astype(audio.dtype if np.issubdtype(audio.dtype, np.floating) else np.float32)
+    desc = (f"restored {runs} clipped run(s) ({100 * nsamp / total:.2f}% of samples, up to {max_run_ms:.0f}ms each) "
+            f"by interpolation, never below the clip level{scale_note}")
     if skipped:
-        desc += f"; {skipped} longer run(s) left untouched (too long to repair honestly)"
+        desc += f"; {skipped} run(s) left untouched (too long to repair honestly, or at the file edge)"
     return fixed, desc
 
 
@@ -232,6 +229,22 @@ def fix_denoise(audio: np.ndarray, sr: int, strength: float = 0.8) -> Tuple[np.n
     return cleaned, f"reduced background noise (estimated SNR {snr_before:.1f} -> {snr_after:.1f} dB)"
 
 
+def fix_dead_channel(audio: np.ndarray) -> Tuple[np.ndarray, Optional[str]]:
+    """A channel that is empty while another carries the music (the music is in one ear only): copy the live channel into the empty
+    one. This restores a balanced file but invents no stereo information, and the description says so."""
+    from .music_checks import dead_channels
+    dead = dead_channels(audio)
+    if not dead:
+        return audio, None
+    live = [c for c in range(audio.shape[1]) if c not in dead]
+    src = max(live, key=lambda c: float(np.sum(np.square(audio[:, c], dtype=np.float64))))
+    fixed = audio.copy()
+    for c in dead:
+        fixed[:, c] = audio[:, src]
+    names = ", ".join(str(c + 1) for c in dead)
+    return fixed, f"filled empty channel {names} from channel {src + 1} (the result is dual mono: no stereo information was restored)"
+
+
 def apply_fix_pipeline(audio: np.ndarray, sr: int, profile: PurposeProfile,
                         issues: List[str]) -> Tuple[np.ndarray, int, List[str]]:
     """
@@ -240,7 +253,12 @@ def apply_fix_pipeline(audio: np.ndarray, sr: int, profile: PurposeProfile,
     """
     applied = []
 
-    if profile.attempt_declip and any("CLIPPING" in i for i in issues):
+    if any(i.startswith("DEAD_CHANNEL") for i in issues):
+        audio, desc = fix_dead_channel(audio)
+        if desc:
+            applied.append(desc)
+
+    if profile.attempt_declip and any(i.startswith("CLIPPING:") for i in issues):
         audio, desc = fix_declip(audio, sr, max_run_ms=profile.declip_max_run_ms)
         if desc:
             applied.append(desc)

@@ -28,6 +28,9 @@ class PurposeProfile:
     min_snr_db: float = 15.0
     max_clipped_ratio: float = 0.001      # fraction of samples allowed at full scale
     max_dc_offset: float = 0.02
+    # Above this share of saturated samples the file is rejected as heavily clipped and no repair is attempted:
+    # interpolation cannot honestly restore that much (see audio_fixer.fix_declip). Provisional default.
+    max_repairable_clipped_ratio: float = 0.05
     min_speech_ratio: Optional[float] = None   # fraction of clip that must be "active" audio
     reject_multi_speaker: bool = False    # TTS: reject if diarization finds >1 speaker
     max_silence_ratio: float = 0.85       # reject if clip is almost entirely silence
@@ -60,6 +63,11 @@ class PurposeProfile:
     # --- dynamic range (mainly Music Gen) ---
     enable_crest_factor_check: bool = False
     min_crest_factor_db: Optional[float] = None   # reject over-compressed "loudness war" masters
+
+    # --- music-only checks (see music_checks.py) ---
+    enable_music_checks: bool = False     # dead channel, fake stereo, mono cancellation, digital dropouts, abrupt edges
+    music_min_mono_sum_db: float = -6.0   # warn if averaging the two channels into mono loses this many dB or more
+    music_min_dropout_ms: float = 20.0    # exact-zero stretch (with sound on both sides) at least this long = dropout
 
     # --- fixable-with-effort tuning ---
     declip_max_run_ms: float = 8.0   # widest clipped run (in ms) fix_declip() will attempt to
@@ -157,6 +165,7 @@ PROFILES = {
         loudness_tolerance_db=4.0,
         enable_crest_factor_check=True,
         min_crest_factor_db=6.0,         # flag heavily brick-walled/over-compressed masters
+        enable_music_checks=True,
     ),
     "custom": PurposeProfile(
         name="Custom / General Purpose",
