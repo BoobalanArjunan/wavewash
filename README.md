@@ -8,7 +8,7 @@
 
 Point WaveWash at a folder of audio and tell it what you are training (speech recognition, voice synthesis, speaker ID, music generation). It checks every file, repairs what it can *verify* is fixed, moves the rest to an error folder with a labeled reason, sets duplicates aside, and writes a full audit log. Your original files are never modified.
 
-> **Status: alpha (0.1.0a1).** It works on the cases in its test suite, but it has not yet been validated on large real-world speech corpora. Treat its verdicts as a first pass and listen to a sample of what it keeps and rejects. See [Limitations](#limitations).
+> **Status: alpha (0.2.0a1).** It works on the cases in its test suite, but it has not yet been validated on large real-world speech corpora. Treat its verdicts as a first pass and listen to a sample of what it keeps and rejects. See [Limitations](#limitations).
 
 ![WaveWash app](https://raw.githubusercontent.com/BoobalanArjunan/wavewash/main/docs/screenshot-setup.png)
 
@@ -48,6 +48,38 @@ wavewash run --help
 
 Purposes: `asr`, `tts`, `speaker_id`, `music_gen`, `custom`.
 
+## Using WaveWash in Python Code (Developer API)
+
+You can import WaveWash directly into your PyTorch datasets, audio preprocessing pipelines, or model ingestion scripts:
+
+```python
+from pathlib import Path
+from wavewash import PROFILES, analyze_file, apply_fix_pipeline, load_audio, save_audio
+
+# 1. Analyze an audio file in-memory
+file_path = Path("sample.wav")
+report = analyze_file(file_path, PROFILES["asr"])
+
+print(f"Passed QC: {report.passed}")
+print(f"SNR: {report.snr_db:.1f} dB  |  LUFS: {report.lufs:.1f}")
+print(f"Issues found: {report.issues}")
+print(f"Advisory warnings: {report.warnings}")
+
+# 2. Repair damaged audio in-memory
+if not report.passed:
+    audio, sr = load_audio(file_path)
+    # Automatically removes DC offset, reconstructs clipped runs, fixes dead stereo channels, etc.
+    repaired_audio, sr, fixes = apply_fix_pipeline(audio, sr, PROFILES["asr"], report.issues)
+    print(f"Fixes applied: {fixes}")
+    save_audio(Path("sample_clean.wav"), repaired_audio, sr)
+
+# 3. Fine-tune threshold limits in code
+import copy
+custom_profile = copy.deepcopy(PROFILES["tts"])
+custom_profile.min_snr_db = 32.0   # enforce stricter studio silence floor
+custom_profile.max_repairable_clipped_ratio = 0.03
+```
+
 ## What you get
 
 ```
@@ -58,12 +90,19 @@ out/
   _logs/          audit_log_*.csv and .json (one row per file: what was found, what was fixed, why rejected), summary_*.md
 ```
 
+## Music Pack (`--purpose music_gen`, new in 0.2)
+
+Extra checks for music files: a dead channel (rejected, and repaired by copying the live channel), plus warnings for fake
+stereo, channels that cancel in mono, digital dropouts mid-song, and files cut mid-sound (click at start or end). Only the
+dead channel is an issue; the rest could be intentional, so they are listed in the report and the file is kept.
+The thresholds are judgement defaults, not measured on real music yet.
+
 ## What it checks and repairs
 
 | Checks | Repairs (only kept if a re-check shows they helped) |
 |---|---|
 | Unreadable, empty or truncated files | DC offset removal |
-| Too short / too long for the purpose | De-clipping of short clipped runs (up to 8 ms, spline interpolation) |
+| Too short / too long for the purpose | De-clipping of short clipped runs (up to 8 ms, spline interpolation that never goes below the clipped value) |
 | Signal-to-noise ratio (estimate) | Noise reduction (spectral subtraction, kept only if the SNR estimate improves) |
 | Clipping, DC offset, loudness | Loudness normalisation, resampling, channel conversion to the purpose's targets |
 | Silence: mostly-silent files, long gaps | Trimming silence at the edges |
@@ -79,7 +118,9 @@ Repair is classical signal processing, **not** machine learning.
 Please read these before trusting a result.
 
 - **Alpha, tested on synthetic data.** The test suite plants known defects (DC offset, clipping, duplicates, broken, empty and stereo files, other sample rates) and checks the routing, that originals are never modified, the local server's safety rules and the command line. It has *not* been validated on large real speech corpora; thresholds are reasoned defaults.
-- **"Repaired" means "passed the re-check", not "restored".** De-clipping interpolates over saturated samples. On heavily clipped audio the re-check can pass even though the result is far from the original recording. Listen to repaired files.
+- **"Repaired" means "passed the re-check", not "restored".** De-clipping interpolates over saturated samples. Since 0.2 a repaired sample is never lowered below the clipped value (0.1 lowered peaks, which on synthetic speech made light clipping 5 to 18 dB *worse* than leaving it), and files with more than 5% saturated samples (`max_repairable_clipped_ratio`) are rejected as `CLIPPING_HEAVY` instead of "repaired". On synthetic speech-like signals the repair is about neutral at 0.1 to 0.5% clipping and 1 to 13 dB better from 2% to 10%. The 5% limit is provisional: run `scripts/real_speech_check.py` on LibriSpeech (see `docs/REAL_DATA_CHECK.md`) and tune it. Restored peaks can exceed full scale, so the whole file is lowered together and the log says by how many dB. Listen to repaired files.
+- **Clipping is only detected at full scale.** Audio clipped at a lower ceiling (for example a limiter at -3 dB) is not detected. A plateau-based detector was tried and dropped: it false-alarmed on 16-bit low bass tones and on speech-like test audio.
+- **The settings page of the web UI does not yet show `max_repairable_clipped_ratio`;** change it in a profile or in code for now.
 - **Reverb (RT60) is a warning only.** Measured against synthetic rooms of known reverb time, the blind estimate could not tell dry from reverberant audio, so it never rejects a file.
 - **Heuristics, not trained models:** the SNR estimate, the multi-speaker check and the near-duplicate threshold. Check their verdicts on your own data.
 - **Music:** mid-track silence is not flagged, and moderate noise can go unnoticed.

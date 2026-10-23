@@ -243,7 +243,7 @@ def process_file(path: Path, profile, profile_key: str, output_dir: Path,
     #                            problem is still measurably present after fixing.
     SKIP_FIX_MARKERS = ("CORRUPT_OR_UNREADABLE", "MULTI_SPEAKER_SUSPECTED",
                          "TOO_SHORT", "TOO_LONG", "HIGH_WER", "LANGUAGE_MISMATCH",
-                         "ALIGNMENT_SUSPECT", "HIGH_REVERB")
+                         "ALIGNMENT_SUSPECT", "HIGH_REVERB", "CLIPPING_HEAVY")
     # HIGH_REVERB stays skip-fix: there's no dereverberation step in audio_fixer.py
     # today, so attempting a "fix" would do nothing. (Real dereverberation is a
     # much heavier addition -- see README if you want that added.)
@@ -252,7 +252,7 @@ def process_file(path: Path, profile, profile_key: str, output_dir: Path,
                                "TOO_SHORT", "TOO_LONG", "HIGH_WER", "LANGUAGE_MISMATCH",
                                "HIGH_REVERB", "LOW_DYNAMIC_RANGE", "LIKELY_LOSSY_SOURCE",
                                "LONG_INTERNAL_SILENCE", "MOSTLY_SILENCE", "INSUFFICIENT_SPEECH",
-                               "LOW_SNR", "CLIPPING", "ALIGNMENT_SUSPECT")
+                               "LOW_SNR", "CLIPPING", "ALIGNMENT_SUSPECT", "DEAD_CHANNEL")
     hard_fail_markers = FATAL_IF_STILL_PRESENT  # kept name for the rest of this function
 
     if not report.issues:
@@ -301,7 +301,7 @@ def process_file(path: Path, profile, profile_key: str, output_dir: Path,
     # carry forward transcript/hard-fail issues that fixing audio can't touch
     for i in report.issues:
         if any(m in i for m in ("HIGH_WER", "LANGUAGE_MISMATCH", "ALIGNMENT_SUSPECT",
-                                 "MULTI_SPEAKER_SUSPECTED", "TOO_SHORT", "TOO_LONG")):
+                                 "MULTI_SPEAKER_SUSPECTED", "TOO_SHORT", "TOO_LONG", "CLIPPING_HEAVY")):
             if i not in remaining_issues:
                 remaining_issues = list(remaining_issues) + [i]
 
