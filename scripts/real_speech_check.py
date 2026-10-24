@@ -72,6 +72,20 @@ def clip_to_ratio(x, target):
     return t, np.clip(t, -1.0, 1.0)
 
 
+SWEEP_CAPS = (1.0, 1.1, 1.2, 1.3, 1.5, 2.0, 1e9)
+
+
+def rms(x):
+    return float(np.sqrt(np.mean(np.square(x))))
+
+
+def loud_match(x, target=0.1):
+    """Scale to a common loudness (RMS) so the listening files differ only in the repair, not in volume. Never above full scale."""
+    y = x * (target / max(rms(x), 1e-12))
+    m = float(np.abs(y).max())
+    return y / m if m > 1.0 else y
+
+
 def best_gain_error(a, truth):
     g = float(np.dot(a, truth) / max(np.dot(a, a), 1e-30))
     return float(np.sum((g * a - truth) ** 2))
@@ -89,6 +103,8 @@ def main():
     ap.add_argument("--clip-files", type=int, default=40, help="utterances for the clipping repair test (default 40)")
     ap.add_argument("--out", type=Path, default=Path("real_check"))
     ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--overshoot-sweep", action="store_true",
+                    help="also try several overshoot caps (max_overshoot) at every clipping level and write the table, to choose the cap from data")
     a = ap.parse_args()
 
     files = sorted(a.librispeech.rglob("*.flac"))
@@ -148,6 +164,8 @@ def main():
     listen = a.out / "listen"
     listen.mkdir(exist_ok=True)
     wrote_listen = set()
+    ser_all, worst_keep = {}, {}
+    per_file = [["file", "clipped_share", "truth_peak_over_clip_level", "samples_at_clip", "gain_0.2_db", "gain_0.1_db", "repair_0.2_level_change_db", "ser_clipped_db", "ser_repaired_0.2_db"]]
     for ratio in (0.001, 0.005, 0.02, 0.05, 0.10, 0.20):
         new, old, worse = [], [], 0
         for p in clip_sample:
@@ -163,22 +181,66 @@ def main():
             new.append(g_new)
             old.append(g_old)
             worse += g_new < -0.5
+            per_file.append([p.name, ratio, f"{np.abs(truth).max():.3f}", int((np.abs(clipped) >= 0.999999).sum()), f"{g_new:.2f}", f"{g_old:.2f}",
+                             f"{20 * np.log10(max(rms(np.asarray(fixed, dtype=np.float64)), 1e-12) / max(rms(clipped), 1e-12)):.2f}",
+                             f"{10 * np.log10(np.sum(truth ** 2) / max(e0, 1e-30)):.1f}", f"{10 * np.log10(np.sum(truth ** 2) / max(e_new, 1e-30)):.1f}"])
+            ser_new = 10 * np.log10(np.sum(truth ** 2) / max(e_new, 1e-30))
+            ser_all.setdefault(ratio, []).append((g_new, ser_new))
+            if ratio in (0.005, 0.02) and g_new < worst_keep.get(ratio, (1e9,))[0]:
+                worst_keep[ratio] = (g_new, p.name, sr, truth, clipped, np.asarray(fixed, dtype=np.float64))
             if ratio in (0.02, 0.10) and ratio not in wrote_listen:
                 tag = f"{int(ratio * 100)}pct"
-                peak = max(np.abs(truth).max(), 1.0)
-                sf.write(str(listen / f"{tag}_1_original.wav"), (truth / peak).astype(np.float32), sr)
-                sf.write(str(listen / f"{tag}_2_clipped.wav"), (clipped / peak).astype(np.float32), sr)
-                sf.write(str(listen / f"{tag}_3_repaired_0.2.wav"), np.asarray(fixed, dtype=np.float32), sr)
-                sf.write(str(listen / f"{tag}_4_repaired_0.1.wav"),
-                         np.clip(legacy_declip(clipped.astype(np.float32), sr), -1, 1).astype(np.float32), sr)
+                # all four files are scaled to the SAME loudness (RMS), so the listener hears the repair, not a volume change
+                variants = {"1_original": truth, "2_clipped": clipped, "3_repaired_0.2": np.asarray(fixed, dtype=np.float64),
+                            "4_repaired_0.1": np.clip(legacy_declip(clipped.astype(np.float32), sr), -1, 1)}
+                for name, v in variants.items():
+                    sf.write(str(listen / f"{tag}_{name}.wav"), loud_match(v).astype(np.float32), sr)
                 wrote_listen.add(ratio)
         if new:
             L.append(f"| {ratio * 100:g}% | {st.median(new):+.2f} [{min(new):+.2f} .. {max(new):+.2f}] | {worse}/{len(new)} | "
                      f"{st.median(old):+.2f} [{min(old):+.2f} .. {max(old):+.2f}] |")
         print(f"  clipping {ratio * 100:g}%: median improvement {st.median(new):+.2f} dB", flush=True)
-    L += ["", "How to read it: the heavy-clipping limit (`max_repairable_clipped_ratio`, default 5%) should sit where the "
+    for ratio, (g, name, sr, truth, clipped, fixed) in worst_keep.items():
+        tag = f"worst_{ratio * 100:g}pct_{g:+.0f}dB"
+        for nm, v in (("1_original", truth), ("2_clipped", clipped), ("3_repaired_0.2", fixed)):
+            sf.write(str(listen / f"{tag}_{nm}.wav"), loud_match(v).astype(np.float32), sr)
+    L += ["", "### Is 'worse' audible? (absolute signal-to-error ratio of the repaired file)", "",
+          "The dB gain above is RELATIVE to how bad the clipped file already was: a file whose clipping was nearly harmless can lose 25 dB and still be clean. "
+          "'Signal-to-error' (SER) compares the error with the speech itself; roughly, above 30 dB the difference is hard to hear, below 20 dB it is usually obvious. "
+          "These limits are rules of thumb, not measured here: listen to the `worst_*` files in `listen/` to judge.", "",
+          "| clipped share | files worse by > 0.5 dB | of those, repaired SER < 30 dB | of those, repaired SER < 20 dB | lowest repaired SER (dB) |", "|---|---|---|---|---|"]
+    for ratio in sorted(ser_all):
+        rows_ = ser_all[ratio]
+        w = [(g_, s_) for g_, s_ in rows_ if g_ < -0.5]
+        L.append(f"| {ratio * 100:g}% | {len(w)}/{len(rows_)} | {sum(s_ < 30 for _, s_ in w)} | {sum(s_ < 20 for _, s_ in w)} | {min(s_ for _, s_ in rows_):.1f} |")
+    L.append("")
+    import csv as _csv
+    with open(a.out / "clip_per_file.csv", "w", newline="") as fh:
+        _csv.writer(fh).writerows(per_file)
+    L += ["", "Per-file numbers (to find the worst cases): clip_per_file.csv", "", "How to read it: the heavy-clipping limit (`max_repairable_clipped_ratio`, default 5%) should sit where the "
           "0.2 improvement stops being clearly positive for most files. If the median is still well above +3 dB at 10% "
           "and almost no file is worse, the limit can be raised; if it is near zero or many files are worse at 5%, lower it.", ""]
+
+    if a.overshoot_sweep:
+        L += ["## 3. Overshoot cap sweep (0.2 repair, same files)", "",
+              "A restored peak may rise at most `cap` times above the clip level. Each cell: median [worst] dB, then how many files got worse by more than 0.5 dB. "
+              "Choose the cap on one run (one --seed), then confirm it on a DIFFERENT --seed; do not choose and confirm on the same files.", "",
+              "| clipped share | " + " | ".join(f"cap {c:g}" for c in SWEEP_CAPS) + " |", "|---|" + "---|" * len(SWEEP_CAPS)]
+        for ratio in (0.001, 0.005, 0.02, 0.05, 0.10, 0.20):
+            cells = []
+            for cap in SWEEP_CAPS:
+                g = []
+                for p in clip_sample:
+                    x, sr = sf.read(str(p), dtype="float64")
+                    truth, clipped = clip_to_ratio(x, ratio)
+                    if truth is None:
+                        continue
+                    f2, _ = fix_declip(clipped.astype(np.float32), sr, max_overshoot=cap)
+                    g.append(10 * np.log10(best_gain_error(clipped, truth) / max(best_gain_error(np.asarray(f2, dtype=np.float64), truth), 1e-30)))
+                cells.append(f"{st.median(g):+.2f} [{min(g):+.1f}], worse {sum(v < -0.5 for v in g)}/{len(g)}" if g else "-")
+            L.append(f"| {ratio * 100:g}% | " + " | ".join(cells) + " |")
+            print(f"  sweep {ratio * 100:g}% done", flush=True)
+        L.append("")
 
     # what the checker does with each level
     L += ["### What the quality check says at each level (profile `asr`)", "",

@@ -93,7 +93,8 @@ def fix_loudness(audio: np.ndarray, sr: int, target_lufs: float) -> Tuple[np.nda
         return audio, None
 
 
-def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: float = 0.999) -> Tuple[np.ndarray, Optional[str]]:
+def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: float = 0.999,
+               max_overshoot: float = 1.5) -> Tuple[np.ndarray, Optional[str]]:
     """
     Repair clipped runs up to `max_run_ms` long by cubic interpolation, under one rule:
     **a clipped sample's true value is at least the clip level.** The interpolated value is
@@ -107,15 +108,22 @@ def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: f
     and better above: +1.1 dB at 2%, +8 dB at 5%, +13 dB at 10%. Real speech may differ; see
     docs/REAL_DATA_CHECK.md.
 
-    Restored peaks can rise above full scale. The whole file (all channels together) is then
-    scaled down just enough that the highest peak sits at 0.999, and the description says by how
-    much. Runs longer than `max_run_ms`, and runs too near the start or end of the file to fit a
+    Restored peaks can rise above full scale, but never above `max_overshoot` times the clip level
+    (default 1.5): an unconstrained cubic curve can swing far past the true peak (seen on real speech:
+    a true peak 3% above the clip level was restored to 2.6 times it), and because the whole file is
+    scaled to fit the highest peak, one such swing used to turn the whole file down by 8 dB and made it
+    32 dB worse than the untouched clipped file. The cap also limits that turn-down to about 3.5 dB.
+    The whole file (all channels together) is then scaled down just enough that the highest peak sits
+    at 0.999, and the description says by how much. 1.5 is a reasoned limit, not a measured optimum;
+    `max_overshoot=1.0` restores the shape but never lifts a peak above the clip level. Runs longer than `max_run_ms`, and runs too near the start or end of the file to fit a
     curve, are left alone.
 
     Still parameter-free interpolation, not a trained declipping model: it is not a substitute
     for a dedicated restoration tool on heavily clipped material (the pipeline rejects those, see
     `max_repairable_clipped_ratio`).
     """
+    if not max_overshoot >= 1.0:
+        raise ValueError("max_overshoot must be at least 1.0 (1.0 = never lift a peak above the clip level)")
     max_run_samples = max(1, int(max_run_ms / 1000 * sr))
     from scipy.interpolate import CubicSpline
     ctx = 4
@@ -147,7 +155,8 @@ def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: f
                 ys = np.concatenate([x[left_start:i], x[j:right_end]])
                 est = CubicSpline(xs, ys)(np.arange(i, j))
                 orig = x[i:j]
-                x[i:j] = np.sign(orig) * np.maximum(np.abs(est), np.abs(orig))   # never below the clipped value
+                # never below the clipped value, and never more than `max_overshoot` times it
+                x[i:j] = np.sign(orig) * np.minimum(np.maximum(np.abs(est), np.abs(orig)), max_overshoot * np.abs(orig))
                 fixed_runs += 1
                 fixed_samples += j - i
             i = j
@@ -172,7 +181,9 @@ def fix_declip(audio: np.ndarray, sr: int, max_run_ms: float = 8.0, threshold: f
     scale_note = ""
     if peak > 0.999:
         fixed = fixed * (0.999 / peak)
-        scale_note = f"; level lowered {-20 * np.log10(0.999 / peak):.1f} dB so the restored peaks fit"
+        lowered_db = -20 * np.log10(0.999 / peak)
+        if lowered_db >= 0.05:          # the 1.0 -> 0.999 trim of an untouched ceiling is not worth mentioning
+            scale_note = f"; level lowered {lowered_db:.1f} dB so the restored peaks fit"
     fixed = fixed.astype(audio.dtype if np.issubdtype(audio.dtype, np.floating) else np.float32)
     desc = (f"restored {runs} clipped run(s) ({100 * nsamp / total:.2f}% of samples, up to {max_run_ms:.0f}ms each) "
             f"by interpolation, never below the clip level{scale_note}")
@@ -259,7 +270,7 @@ def apply_fix_pipeline(audio: np.ndarray, sr: int, profile: PurposeProfile,
             applied.append(desc)
 
     if profile.attempt_declip and any(i.startswith("CLIPPING:") for i in issues):
-        audio, desc = fix_declip(audio, sr, max_run_ms=profile.declip_max_run_ms)
+        audio, desc = fix_declip(audio, sr, max_run_ms=profile.declip_max_run_ms, max_overshoot=profile.declip_max_overshoot)
         if desc:
             applied.append(desc)
 

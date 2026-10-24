@@ -70,6 +70,8 @@ class PurposeProfile:
     music_min_dropout_ms: float = 20.0    # exact-zero stretch (with sound on both sides) at least this long = dropout
 
     # --- fixable-with-effort tuning ---
+    declip_max_overshoot: float = 1.5  # a restored peak may rise at most this many times above the clip level (1.0 = never above it).
+                                       # Reasoned limit, not tuned: without it one wild interpolation turned a whole file down by 8 dB.
     declip_max_run_ms: float = 8.0   # widest clipped run (in ms) fix_declip() will attempt to
                                        # repair via interpolation. Longer runs than this mean too
                                        # much of the original waveform is genuinely gone -- interpolating
