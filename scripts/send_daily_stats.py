@@ -8,7 +8,7 @@ import sys
 import urllib.request
 from datetime import datetime, timezone
 
-TARGET_EMAIL = os.environ.get("NOTIFICATION_EMAIL", "boobalan.it@gmail.com")
+TARGET_EMAIL = os.environ.get("NOTIFICATION_EMAIL", "boobalan_arjunan@composermind.com")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "WaveWash Stats <onboarding@resend.dev>")
 
