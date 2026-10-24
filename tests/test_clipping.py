@@ -205,3 +205,60 @@ def test_heavy_clipping_issue_does_not_trigger_the_declip_step():
     out, _, applied = apply_fix_pipeline(clipped.astype(np.float32), SR, PROFILES["asr"],
                                          ["CLIPPING_HEAVY: 9% samples saturated"])
     assert not any("clipped run" in a for a in applied)
+
+
+# ---------------------------------------------------------------- overshoot cap (added after a real-speech failure)
+def _sharp_pulses(seed=213):
+    """Sharp-edged pulses whose true peak is only 2-4% above the clip level. An unconstrained cubic curve swings far past that
+    (measured on real speech too: a true peak 3% above the clip level was restored to 2.6 times it)."""
+    r = np.random.RandomState(seed)
+    x = np.zeros(SR)
+    for _ in range(20):
+        c, w = r.randint(500, SR - 500), r.randint(3, 12)
+        x[c:c + w] += 1.02 + 0.02 * r.rand()
+    return x + r.randn(SR) * 0.01
+
+
+def _lowered_db(desc):
+    import re
+    m = re.search(r"lowered ([\d.]+) dB", desc or "")
+    return float(m.group(1)) if m else 0.0
+
+
+def test_overshoot_cap_limits_how_far_the_file_is_turned_down():
+    clipped = np.clip(_sharp_pulses(), -1, 1).astype(np.float32)
+    _, old = fix_declip(clipped, SR, max_overshoot=1e9)           # the behaviour before the cap
+    _, new = fix_declip(clipped, SR)
+    assert _lowered_db(old) > 6.0                                   # the failure is real (this test would be empty otherwise)
+    assert 0 < _lowered_db(new) <= 3.6                              # 1.5x cap = at most 3.5 dB
+
+
+def test_cap_of_one_never_lifts_a_peak_above_the_clip_level():
+    x = _sharp_pulses()
+    clipped = np.clip(x, -1, 1)
+    fixed, desc = fix_declip(clipped.astype(np.float32), SR, max_overshoot=1.0)
+    assert "level lowered" not in desc
+    assert np.abs(fixed).max() <= np.abs(clipped).max() + 1e-6
+    assert 10 * np.log10(best_gain_error(clipped, x) / best_gain_error(fixed.astype(np.float64), x)) > -0.5
+
+
+def test_a_looser_cap_never_gives_a_lower_peak():
+    clipped = np.clip(_sharp_pulses(), -1, 1).astype(np.float32)
+    ups = [_lowered_db(fix_declip(clipped, SR, max_overshoot=c)[1]) for c in (1.0, 1.2, 1.5, 2.0)]
+    assert ups == sorted(ups) and ups[0] == 0.0 and ups[-1] > ups[1]
+
+
+@pytest.mark.parametrize("bad", [0.5, 0.999, 0.0, -1.0, float("nan")])
+def test_invalid_overshoot_is_rejected(bad):
+    with pytest.raises(ValueError):
+        fix_declip(np.clip(_sharp_pulses(), -1, 1).astype(np.float32), SR, max_overshoot=bad)
+
+
+def test_every_profile_has_the_overshoot_limit_and_the_pipeline_uses_it():
+    from wavewash.audio_fixer import apply_fix_pipeline
+    assert all(p.declip_max_overshoot == 1.5 for p in PROFILES.values())
+    clipped = np.clip(_sharp_pulses(), -1, 1).astype(np.float32)
+    tight = dataclasses.replace(PROFILES["asr"], declip_max_overshoot=1.0)
+    _, _, applied_default = apply_fix_pipeline(clipped.copy(), SR, PROFILES["asr"], ["CLIPPING: 2% of samples at full scale"])
+    _, _, applied_tight = apply_fix_pipeline(clipped.copy(), SR, tight, ["CLIPPING: 2% of samples at full scale"])
+    assert any("level lowered" in a for a in applied_default) and not any("level lowered" in a for a in applied_tight)

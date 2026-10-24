@@ -80,3 +80,5 @@ huggingface_space/
 
 # Personal local planning & checkpoints (never push to GitHub)
 project_plan/
+real_check*/
+
