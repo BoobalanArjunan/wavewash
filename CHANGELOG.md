@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0a1 (unreleased)
+## 0.2.0 (2026-10-27)
 
 Clipping, fixed properly. Music Pack added.
 

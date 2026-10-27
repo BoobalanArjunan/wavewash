@@ -1,7 +1,7 @@
 # WaveWash
 
 [![tests](https://github.com/BoobalanArjunan/wavewash/actions/workflows/tests.yml/badge.svg)](https://github.com/BoobalanArjunan/wavewash/actions/workflows/tests.yml)
-![version](https://img.shields.io/badge/version-0.2.0a1-blue)
+![version](https://img.shields.io/badge/version-0.2.0-blue)
 ![status](https://img.shields.io/badge/status-production--ready-green)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
@@ -9,7 +9,7 @@
 
 Point WaveWash at a folder of audio or embed it directly into your Python ML pipelines. It inspects every file, repairs what it can *verify* is fixed, segregates rejected files into categorized error folders with clear reasons, sets duplicates aside, and writes full audit logs. Original audio files are never modified.
 
-> **Status: v0.2.0a1 (Production-Ready Engine).** Mathematically validated on real speech (LibriSpeech: **71.8% MSE distortion reduction** on clipping repair, two-tier `CLIPPING_HEAVY` guardrails) and real multi-track music (MUSDB18-HQ: dead-channel auto-repair, zero false rejections). Features a first-class in-memory Python Developer API for PyTorch and ML pipelines.
+> **Status: v0.2.0 (Production-Ready Engine).** Mathematically validated on real speech (LibriSpeech: **71.8% MSE distortion reduction** on clipping repair, two-tier `CLIPPING_HEAVY` guardrails) and real multi-track music (MUSDB18-HQ: dead-channel auto-repair, zero false rejections). Features a first-class in-memory Python Developer API for PyTorch and ML pipelines.
 
 ![WaveWash app](https://raw.githubusercontent.com/BoobalanArjunan/wavewash/main/docs/screenshot-setup.png)
 
@@ -203,7 +203,7 @@ output_dir/
 
 ---
 
-## Empirical Benchmark Results (v0.2.0a1)
+## Empirical Benchmark Results (v0.2.0)
 
 WaveWash 0.2 has been validated against real-world speech and multi-track music corpora:
 
