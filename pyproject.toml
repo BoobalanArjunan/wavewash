@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "wavewash"
-version = "0.2.0a1"
+version = "0.2.0"
 description = "WaveWash: audio QC & data prep - check, repair, dedupe and audit audio datasets for ML training (ASR, TTS, speaker ID, music generation), with a local web UI."
 readme = "README.md"
 license = { text = "MIT" }
