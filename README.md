@@ -1,11 +1,14 @@
 # WaveWash
 
 [![tests](https://github.com/BoobalanArjunan/wavewash/actions/workflows/tests.yml/badge.svg)](https://github.com/BoobalanArjunan/wavewash/actions/workflows/tests.yml)
+[![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/BoobalanArjunan/wavewash/blob/main/notebooks/quickstart.ipynb)
 ![version](https://img.shields.io/badge/version-0.2.0-blue)
 ![status](https://img.shields.io/badge/status-production--ready-green)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 
 **Deterministic, mathematically validated audio quality control, verification, repair, and deduplication for Speech & Audio Machine Learning (ASR, TTS, Speaker ID, Music Generation).**
+
+> 🚀 **Try it immediately in your browser:** Run the **[Interactive 1-Click Google Colab Quickstart](https://colab.research.google.com/github/BoobalanArjunan/wavewash/blob/main/notebooks/quickstart.ipynb)** — test audio QC, de-clipping, and pre-training split leakage prevention with zero local setup.
 
 Point WaveWash at a folder of audio or embed it directly into your Python ML pipelines. It inspects every file, repairs what it can *verify* is fixed, segregates rejected files into categorized error folders with clear reasons, sets duplicates aside, and writes full audit logs. Original audio files are never modified.
 
