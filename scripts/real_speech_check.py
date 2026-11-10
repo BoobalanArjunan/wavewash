@@ -29,7 +29,7 @@ try:
     from wavewash.config import PROFILES
     from wavewash.quality_checker import analyze_file
 except ImportError:
-    sys.exit("wavewash is not installed (pip install --pre wavewash, or pip install -e . from a checkout)")
+    sys.exit("wavewash is not installed (pip install wavewash, or pip install -e . from a checkout)")
 
 
 def legacy_declip(audio, sr, max_run_ms=8.0, threshold=0.999):

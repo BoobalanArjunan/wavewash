@@ -5,7 +5,7 @@ The test suite uses synthetic audio. This check uses real speech (LibriSpeech) a
 2. Does the clipping repair really help on real speech, and is the 5% heavy-clipping limit in the right place?
 
 ## Tasks
-1. Install: `pip install -e ".[dev]"` from the repo (or `pip install --pre wavewash`), then `pytest -q` (expect 64 passed).
+1. Install: `pip install -e ".[dev]"` from the repo (or `pip install wavewash`), then `pytest -q` (expect 64 passed).
 2. Download LibriSpeech `dev-clean` from openslr.org/12 and unpack it.
 3. Run: `python scripts/real_speech_check.py --librispeech ~/LibriSpeech/dev-clean --out real_check`
 4. Open `real_check/results.md` and send it to me.

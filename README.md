@@ -225,6 +225,12 @@ Contributions and real-world audio edge cases are welcome! If WaveWash rejects a
 
 ---
 
+## ComposerMind Open Audio ML Suite
+
+WaveWash integrates cleanly alongside companion open-source audio verification tools on PyPI: [`splitsafe`](https://pypi.org/project/splitsafe/), [`stemcheck`](https://pypi.org/project/stemcheck/), [`bandcheck`](https://pypi.org/project/bandcheck/), [`phasecheck`](https://pypi.org/project/phasecheck/), [`driftcheck-audio`](https://pypi.org/project/driftcheck-audio/), [`mixforge-audio`](https://pypi.org/project/mixforge-audio/), [`tonicfind`](https://pypi.org/project/tonicfind/), [`tempocheck`](https://pypi.org/project/tempocheck/), and [`turnscope`](https://pypi.org/project/turnscope/).
+
+---
+
 ## License
 
-MIT License. Designed and maintained by **Boobalan Arjunan**.
+MIT License. Copyright (c) 2026 Boobalan Arjunan.
