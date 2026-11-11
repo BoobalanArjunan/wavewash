@@ -22,5 +22,6 @@ jobs:
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
           NOTIFICATION_EMAIL: ${{ secrets.NOTIFICATION_EMAIL || 'boobalan.it@gmail.com' }}
+          GITHUB_TOKEN: ${{ github.token }}
         run: |
           python scripts/send_daily_stats.py
